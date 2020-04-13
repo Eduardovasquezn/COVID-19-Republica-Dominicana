@@ -1,5 +1,5 @@
 # COVID-19-Republica-Dominicana
-COVID-19 República Dominicana
+Dashboard del COVID-19 en la República Dominicana.
 
 https://eduardovasquezn.github.io/COVID-19-Republica-Dominicana/
 
