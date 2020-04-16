@@ -1,0 +1,765 @@
+---
+title: "COVID-19"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    social: menu
+    source_code: embed
+    vertical_layout: scroll
+
+---
+
+```{r setup, include=FALSE}
+#------------------ Packages ------------------
+library(flexdashboard)
+library(tidyr)
+library(readxl)
+library(plotly)
+library(dplyr)
+library(DT)
+library(ggmap)
+library(rgdal)
+library(rgeos)
+library(maptools)
+library(tmap)
+library(ggplot2)
+library(lubridate)
+library(data.table)
+library(sp)
+library(ggpubr)
+library(grid)
+library(leaflet)
+library(shiny)
+library(tibble)
+library(deSolve)
+library(reshape2)
+
+data1<-read_xlsx("C:/Users/eduar/Google Drive (1)/Work/Short articles/COVID/DataCOVID.xlsx",sheet="Casos")
+attach(data1)
+data1$Fecha<-as.Date(Fecha)
+names(data1)
+Data1<-gather(data1,"Condicion","Cantidad",2:4)
+
+
+NominalGrowth <- function(x)(abs(x-lag(x)))
+
+InfectadosDiarios<-NominalGrowth(data1$`Infectados Activos`)
+RecuperadosDiarios<-NominalGrowth(data1$Recuperados)
+FallecidosDiarios<-NominalGrowth(data1$Fallecidos)
+
+DataDiaria<-data.frame(Fecha=data1$Fecha, InfectadosDiarios,Recuperados=RecuperadosDiarios,Fallecidos=FallecidosDiarios) 
+DataDiaria<-DataDiaria %>% 
+  rename("Infectados Activos" = InfectadosDiarios)
+
+DataDiaria1<- gather(DataDiaria,"Grupo","Cantidad",2:4)
+
+
+
+data2<-read_xlsx("C:/Users/eduar/Google Drive (1)/Work/Short articles/COVID/DataCOVID.xlsx",sheet="tabla")
+attach(data2)
+
+
+dataMapa<- read_excel("C:/Users/eduar/Google Drive (1)/Work/Short articles/COVID/DataCOVID.xlsx",sheet = "Sheet1")
+attach(dataMapa)
+names(dataMapa)
+mapPROV<- readOGR(dsn = "C:/Users/eduar/Google Drive (1)/Cursos/R Commander/Base de Datos/ShapeFilesCenso2010/PROVCenso2010.shp")
+dataMapa$Fecha<-as.Date(Fecha)
+
+DataMapa1<-as_tibble(dataMapa)
+
+MapFecha1<-DataMapa1 %>% 
+  filter(Fecha=="2020-04-13")
+
+Transponer<-gather(MapFecha1,"Provincias","Casos",2:33)
+Casos<-Transponer$Casos
+Provincias<-Transponer$Provincias
+
+
+mapPROV$Casos<-Transponer$Casos
+qtm(shp=mapPROV, fill = c("Casos"), fill.palette="-Blues", borders = "Grey")
+
+
+b<-spTransform(mapPROV, CRS("+init=epsg:4326"))
+leaflet() %>%
+  addProviderTiles("CartoDB.Positron", options= providerTileOptions(opacity = 0.99)) %>%
+  addPolygons(data = b,
+              stroke = FALSE, fillOpacity = 0.5, smoothFactor = 0.5
+  )
+
+
+
+
+bins <- c(0, 10,25,50, 100,300,500, 1100)
+pal <- colorBin("YlOrRd", domain = mapPROV$Casos, bins = bins)
+labels<- paste(Provincias,":",Casos)
+
+
+
+
+
+
+
+
+#------------------ Parameters ------------------
+# Set colors
+# https://www.w3.org/TR/css-color-3/#svg-color
+color_confirmados <- "purple"
+color_infectados <- "#1f77b4"
+color_recuperados <- "forestgreen"
+color_muertos <- "red"
+#------------------ Data ------------------
+
+
+# Intervencion
+
+seir_model_int = function (current_timepoint, state_values, parameters)
+{
+  
+  # create state variables (local variables)
+  S = state_values [1]        # susceptibles
+  E = state_values [2]        #   exposed
+  I = state_values [3]        # infectious
+  R = state_values [4]        # recovered
+  D = state_values [5]        # Death
+  with ( 
+    as.list (parameters),     # variable names within parameters can be used 
+    {
+      # compute derivatives
+      dS = (-beta * S * I)
+      dE = (+beta * S * I) - (delta * E)
+      dI = (delta * E) - (gamma * I)
+      dR = (gamma * I)  - (alpha*I)
+      dD = alpha*I
+      # combine results
+      results = c (dS, dE, dI, dR,dD)
+      list (results)
+    }
+  )
+}
+
+
+
+
+infectious_period = 31            # Duracion media de la enfermedad	12   # OMC data= 2weeks for mild case, critical cases is 4-6 weeks
+# contact_rate = 4.5                #  Tasa diaria de interaccion	2.5
+# transmission_probability = 0.14   # Probabilidad de contagio	14%
+Mortalidad<-0.059 
+TRecuperacion<-	1- Mortalidad
+latent_period = 3                # latent period
+
+# IncubPeriod= 5 #Duration of incubation period   # OMC data
+# PresymPeriod=2 #Length of infectious phase of incubation period
+# a0=min(10^6,(IncubPeriod-PresymPeriod)^(-1)) # true latent period, avoid infinity when no presymptomatic phase
+
+
+# beta_value = contact_rate * transmission_probability       # Transmission rate
+beta_value = 0.5      # Transmission rate
+delta_value = 1 / latent_period                             # latent period
+gamma_value = 1 / infectious_period              # Recovery rate  #Ponerle 1 o TRecuperacion?
+alpha_value= Mortalidad/ infectious_period 
+
+Ro = beta_value / gamma_value        # Reproductive number.
+
+
+# Disease dynamics parameters.
+
+parameter_list = c (beta = beta_value, gamma = gamma_value, delta = delta_value,alpha=alpha_value)
+
+
+X = 10448498          # susceptible hosts
+W = 1           # exposed hosts
+Y = 1           # infectious hosts
+Z = 0          # recovered hosts
+Dead=0            # Dead
+
+
+# Population
+N = X + W + Y + Z + Dead
+
+# Initial values
+initial_values = c (S = X/N, E = W/N, I = Y/N, R = Z/N ,D = Dead/N)
+
+# Output timepoints.
+# 1ro de marzo
+timepoints = seq (0, 17, by=1)  # Dias que queremos estudiar
+
+
+output = lsoda (initial_values, timepoints, seir_model_int, parameter_list)
+output %>% 
+  head
+
+
+Data<-cbind(fecha=output[,1],round(output[,2:6]*N,0)) %>% 
+  as.data.frame()
+
+Data %>% 
+  tail()
+
+# Datos acumulados
+gather(Data,"Variable","n",2:6) %>% 
+  ggplot(aes(fecha,n,colour=Variable))+geom_point()+geom_line()
+
+
+
+
+
+
+
+
+
+
+
+#------------------------------------------------------------------
+#------------------------------------------------------------------
+##------------------------------------------------------------------
+#
+#             Aplicando la intervencion en el dia 43
+#
+#------------------------------------------------------------------
+#------------------------------------------------------------------
+#------------------------------------------------------------------
+
+# contact_rate1 = 1.5              #  Tasa diaria de interaccion	2.5
+beta_value1 = 0.34      # Transmission rate
+Ro1 = beta_value1 / gamma_value        # Reproductive number.
+Mortalidad1<-0.051
+alpha_value1= Mortalidad1/ infectious_period
+
+
+# Disease dynamics parameters.
+
+parameter_list1 = c (beta = beta_value1, gamma = gamma_value, delta = delta_value,alpha=alpha_value1)
+
+
+X1 = last(Data$S)          # susceptible hosts
+W1 = last(Data$E)           # exposed hosts
+Y1= last(Data$I)           # infectious hosts
+Z1 = last(Data$R)          # recovered hosts
+Dead1= last(Data$D)            # Dead
+
+
+# Population
+N1 = X1 + W1 + Y1 + Z1 + Dead1
+
+# Initial values
+initial_values1 = c (S1 = X1/N1, E1 = W1/N1, I1 = Y1/N1, R1 = Z1/N1 ,D1 = Dead1/N1)
+
+# Output timepoints.
+
+timepoints = seq (0, 42, by=1)  # Dias que queremos estudiar
+
+
+outputInt = lsoda (initial_values1, timepoints, seir_model_int, parameter_list1)
+outputInt %>% 
+  head
+
+
+DataInt<-cbind(fecha=outputInt[,1],round(outputInt[,2:6]*N1,0)) %>% 
+  as.data.frame()
+
+
+# Datos acumulados
+gather(DataInt,"Variable","n",2:6) %>% 
+  ggplot(aes(fecha,n,colour=Variable))+geom_point()+geom_line()
+
+
+
+
+
+DataInt %>% 
+  head(24)
+
+
+
+
+DataInt %>% 
+  tail(23)
+
+
+#------------------------------------------------------------------
+#------------------------------------------------------------------
+##------------------------------------------------------------------
+#
+#             Retorno de la cuarentena
+#
+#------------------------------------------------------------------
+#------------------------------------------------------------------
+#------------------------------------------------------------------
+seir_model = function (current_timepoint, state_values, parameters)
+{
+  
+  # create state variables (local variables)
+  S = state_values [1]        # susceptibles
+  E = state_values [2]        #   exposed
+  I = state_values [3]        # infectious
+  R = state_values [4]        # recovered
+  D = state_values [5]        # Death
+  with ( 
+    as.list (parameters),     # variable names within parameters can be used 
+    {
+      # compute derivatives
+      dS = (-beta * S * I)
+      dE = (+beta * S * I) - (delta * E)
+      dI = (delta * E) - (gamma * I)
+      dR = (gamma * I)  - (alpha*I)
+      dD = alpha*I
+      # combine results
+      results = c (dS, dE, dI, dR,dD)
+      list (results)
+    }
+  )
+}
+
+
+contact_rate2 = 4                #  Tasa diaria de interaccion	2.5
+beta_value2 = 0.5       # Transmission rate
+Ro2 = beta_value2 / gamma_value        # Reproductive number.
+ 
+
+
+# Disease dynamics parameters.
+
+parameter_list2 = c (beta = beta_value2, gamma = gamma_value, delta = delta_value,alpha=alpha_value)
+
+
+X2 = last(DataInt$S1)          # susceptible hosts
+W2 = last(DataInt$E1)            # exposed hosts
+Y2 = last(DataInt$I1)            # infectious hosts
+Z2 = last(DataInt$R1)           # recovered hosts
+Dead2= last(DataInt$D1)             # Dead
+
+
+# Population
+N2 = X2 + W2 + Y2 + Z2 + Dead2
+
+# Initial values
+initial_values2 = c (S2 = X2/N2, E2 = W2/N2, I2 = Y2/N2, R2 = Z2/N2 ,D2 = Dead2/N2)
+
+# Output timepoints.
+
+timepoints = seq (0, 100, by=1)  # Dias que queremos estudiar
+
+
+outputReg = lsoda (initial_values2, timepoints, seir_model, parameter_list2)
+outputReg %>% 
+  head
+
+
+DataReg<-cbind(fecha=outputReg[,1],round(outputReg[,2:6]*N2,0)) %>% 
+  as.data.frame()
+
+
+# Datos acumulados
+gather(DataReg,"Variable","n",2:6) %>% 
+  ggplot(aes(fecha,n,colour=Variable))+geom_point()+geom_line()
+
+DataReg %>% 
+  head()
+
+
+a<-c(Data,DataInt,DataReg)
+Susceptibles<-c(a$S,a$S1,a$S2)
+Expuestos<-c(a$E,a$E1,a$E2)
+Infectados<-c(a$I,a$I1,a$I2)
+Recuperados<-c(a$R,a$R1,a$R2)
+Fallecidos<-c(a$D,a$D1,a$D2)
+FechaModelo<-seq(as.Date("2020/3/1"),as.Date("2020/8/9"), by = "1 day")
+DataModelo<-data.frame(FechaModelo,Susceptibles,Expuestos,Infectados,Recuperados,Fallecidos)
+
+DataModelo1<-gather(DataModelo,"Condicion","Cantidad",2:6)
+
+
+
+
+
+
+```
+
+Resumen 
+=======================================================================
+Row 
+-----------------------------------------------------------------------
+
+### Casos Confirmados {.value-box}
+
+```{r}
+valueBox(value = paste(format(Data1 %>%
+  group_by(Condicion) %>%
+   top_n(1, Cantidad) %>%
+  pull() %>% 
+  sum(), big.mark = ","), "", sep = " "), 
+         caption = "Casos Confirmados (Infectados Activos+Recuperados+Fallecidos)", 
+         icon = "fas fa-user-md", 
+         color = color_confirmados)
+```
+
+
+### Casos Activos {.value-box}
+
+```{r}
+valueBox(value = paste(format(Data1 %>%
+  filter(Condicion=="Infectados Activos") %>%
+  top_n(1, Cantidad) %>%
+  pull(), big.mark = ","), " (",
+                       round(100 * Data1 %>%
+  filter(Condicion=="Infectados Activos") %>%
+  top_n(1, Cantidad) %>%
+  pull() / Data1 %>%
+  group_by(Condicion) %>%
+   top_n(1, Cantidad) %>%
+  pull() %>% 
+  sum(), 1), 
+                       "%)", sep = ""), 
+         caption = "Casos Infectados Activos", icon = "fas fa-user-plus", 
+         color = color_infectados)
+```
+
+### Recuperados {.value-box}
+
+```{r}
+valueBox(value = paste(format(Data1 %>%
+  filter(Condicion=="Recuperados") %>%
+  top_n(1, Cantidad) %>%
+  pull(), big.mark = ","), " (",
+                       round(100 * Data1 %>%
+  filter(Condicion=="Recuperados") %>%
+  top_n(1, Cantidad) %>%
+  pull() / Data1 %>%
+  group_by(Condicion) %>%
+   top_n(1, Cantidad) %>%
+  pull() %>% 
+  sum(), 1), 
+                       "%)", sep = ""), 
+         caption = "Casos Recuperados", icon = "fas fa-user-shield", 
+         color = color_recuperados)
+```
+
+### Fallecidos {.value-box}
+
+```{r}
+valueBox(value = paste(format(Data1 %>%
+  filter(Condicion=="Fallecidos") %>%
+  top_n(1, Cantidad) %>%
+  pull(), big.mark = ","), " (",
+                       round(100 * Data1 %>%
+  filter(Condicion=="Fallecidos") %>%
+  top_n(1, Cantidad) %>%
+  pull() / Data1 %>%
+  group_by(Condicion) %>%
+   top_n(1, Cantidad) %>%
+  pull() %>% 
+  sum(), 1), 
+                       "%)", sep = ""),
+         caption = "Casos Fallecidos", 
+         icon = "fas fa-user-alt-slash", 
+         color = color_muertos)
+```
+
+
+Row 
+-----------------------------------------------------------------------
+
+### Evolución de casos reportados de COVID-19
+
+```{r daily_summary}
+ggplotly(
+  Data1 %>% 
+    mutate(Año=substr(Fecha,1,4),
+           Mes=substr(Fecha,6,7),
+           Día=substr(Fecha,9,13)) %>% 
+    ggplot(aes(x=Fecha,y=Cantidad, group=1,
+               text = paste('Fecha:', paste(Día,"/",Mes,"/",Año),
+                            '<br>Cantidad:', formatC(round(Cantidad), format = "f", big.mark = ",", drop0trailing = TRUE))))+
+    geom_line(aes(colour = Condicion),size=1)+
+    geom_point(aes(colour = Condicion),size=1.1)+
+    scale_y_continuous(labels = scales::comma)+
+    labs(x = "Fecha", y = "Cantidad de casos",colour="Grupo")+theme_minimal() +
+    theme(axis.title.x = element_text(vjust = -1),
+          axis.title.y = element_text(vjust = 1.5)) , tooltip = "text") %>% 
+  layout(
+    
+    updatemenus = list(
+      list(
+        type = "buttons",
+        direction = "left",
+        xanchor = 'center',
+        yanchor = "top",
+        x = 0.5,
+        y = 1.01,
+        buttons = list(
+          
+          list(method = "Infectados Activos",
+               args = list("visible", c(F,T,F)),
+               label = "Infectados Activos"),
+          
+          list(method = "Recuperados",
+               args = list("visible", c(F,F,T)),
+               label = "Recuperados"),
+          
+          list(method = "Fallecidos",
+               args = list("visible", c(T,F,F)),
+               label = "Fallecidos"),
+          
+          list(method = "Resetear",
+               args = list("visible", c(T,T,T)),
+               label = "Resetear")))
+    )
+    
+  ) 
+
+```
+
+Row {data-width=400}
+-----------------------------------------------------------------------
+
+
+### Evolución de casos reportados diarios de COVID-19
+    
+```{r}
+
+ggplotly(
+  DataDiaria1 %>% 
+    mutate(Año=substr(Fecha,1,4),
+           Mes=substr(Fecha,6,7),
+           Día=substr(Fecha,9,13)) %>% 
+    ggplot(aes(x=Fecha,y=Cantidad, fill=Grupo,
+               text = paste('Fecha:', paste(Día,"/",Mes,"/",Año),
+                            '<br>Cantidad:', Cantidad)))+
+    geom_bar(stat="identity", position = 'dodge')+
+    scale_y_continuous(labels = scales::comma)+
+    labs(x = "Fecha", y = "Cantidad de casos",color="Grupo")+theme_minimal() +
+    theme(axis.title.x = element_text(vjust = -1),
+          axis.title.y = element_text(vjust = 1.5)) , tooltip = "text")%>%   
+  layout(
+    updatemenus = list(
+      list(
+        type = "buttons",
+        direction = "left",
+        xanchor = 'center',
+        yanchor = "top",
+        x = 0.5,
+        y = 1.01,
+        buttons = list(
+          
+          list(method = "Infectados Activos",
+               args = list("visible", c(F,T,F)),
+               label = "Infectados Activos"),
+          
+          list(method = "Recuperados",
+               args = list("visible", c(F,F,T)),
+               label = "Recuperados"),
+          
+          list(method = "Fallecidos",
+               args = list("visible", c(T,F,F)),
+               label = "Fallecidos"),
+          
+          list(method = "Resetear",
+               args = list("visible", c(T,T,T)),
+               label = "Resetear")))
+    )
+    
+  ) 
+
+  
+```
+
+
+### COVID-19 según provincia
+    
+```{r}
+data2 %>% 
+ mutate(ProInfectados=format(round(Confirmados/Poblacion*100,2), nsmall = 2) ,
+        Poblacion = formatC(round(Poblacion), format = "f", big.mark = ",", drop0trailing = TRUE)) %>% 
+  arrange(Provincia)  %>% 
+  datatable( class = 'cell-border stripe',
+             colnames = c('Proporción de Casos Confirmados (%)' = 'ProInfectados',
+                          'Población' = 'Poblacion'),
+             options = list(
+               columnDefs = list(list(className = 'dt-center', targets = 0:7))
+             ))
+```
+
+
+Mapa 
+=======================================================================
+
+Row {data-height=750}
+-----------------------------------------------------------------------
+
+
+### Mapa 
+
+
+
+```{r}
+leaflet() %>%
+  addTiles() %>%   # Me deja el fondo gris
+  addPolygons(data = b,
+              fillColor = ~pal(mapPROV$Casos),
+              weight = 2,
+              opacity = 1,
+              color = "grey",
+              dashArray = "3",
+              fillOpacity = 0.7,
+              highlight = highlightOptions(
+                weight = 5,
+                color = "#666",
+                dashArray = "",
+                fillOpacity = 0.7,
+                bringToFront = TRUE),
+              label = labels,
+              labelOptions = labelOptions(
+                style = list("font-weight" = "normal", padding = "3px 8px"),
+                textsize = "15px",
+                direction = "auto"))%>% 
+  addLegend("topright",
+            pal = pal,
+            values =  Casos,
+            title = "Casos Confirmados",
+            opacity = 1)
+
+
+```
+
+Modelo SEIR 
+=======================================================================
+
+Row {data-height=750}
+-----------------------------------------------------------------------
+
+
+### **Interpretación:** En la Figura se muestra el número esperado de individuos susceptibles, expuestos o latentes (E), infectados, recuperados y fallecidos a lo largo del tiempo. Las personas infectadas pasan primero por una fase de incubación donde son asintomáticas (E). Más adelante, los individuos infectados (sintomáticos y asintomáticos) son portadores de la enfermedad y la pueden transmitir a otras personas mediante la interacción con los susceptibles. Los infectados presentan dos opciones, se recuperan/inmunizan o fallecen.
+    
+```{r}
+ggplotly(
+  DataModelo1 %>% 
+    mutate(Año=substr(FechaModelo,1,4),
+           Mes=substr(FechaModelo,6,7),
+           Día=substr(FechaModelo,9,13)) %>% 
+    ggplot(aes(x=FechaModelo,y=Cantidad, group=1,
+               text = paste('Fecha:', paste(Día,"/",Mes,"/",Año),
+                            '<br>Cantidad:', formatC(round(Cantidad), format = "f", big.mark = ",", drop0trailing = TRUE))))+
+    geom_line(aes(colour = Condicion),size=.5)+
+    geom_point(aes(colour = Condicion),size=.4)+
+    scale_y_continuous(labels = scales::comma)+
+    labs(title = "Evolución de casos reportados de COVID-19",
+         x = "Fecha", y = "Cantidad de personas",colour="Grupo")+theme_minimal() +
+    theme(axis.title.x = element_text(vjust = -1),
+          axis.title.y = element_text(vjust = 1.5)) , tooltip = "text") %>% 
+  layout(
+    updatemenus = list(
+      list(
+        type = "buttons",
+        direction = "left",
+        xanchor = 'center',
+        yanchor = "top",
+        x = 0.5,
+        y = 1.01,
+        buttons = list(
+          
+          list(method = "Susceptibles",
+               args = list("visible", c(F,F,F,F,T,F)),
+               label = "Susceptibles"),
+          
+          list(method = "Expuestos",
+               args = list("visible", c(T,F,F,F,F,F)),
+               label = "Expuestos"),
+          
+          list(method = "Infectados",
+               args = list("visible", c(F,F,T,F,F,F)),
+               label = "Infectados"),
+          
+          list(method = "Recuperados",
+               args = list("visible", c(F,F,F,T,F,F)),
+               label = "Recuperados"),
+          
+          list(method = "Fallecidos",
+               args = list("visible", c(F,T,F,F,F,F)),
+               label = "Fallecidos"),
+          
+          list(method = "Resetear",
+               args = list("visible", c(T,T,T,T,T,T)),
+               label = "Resetear")))
+    )
+    
+  ) 
+```
+
+ 
+
+Descripción del Modelo
+=======================================================================
+
+ Row  
+-----------------------------------------------------------------------
+### Ecuaciones
+
+\begin{equation}
+\frac{\dot{dS}}{dt}= - \frac{\beta  S I }{N}
+\end{equation}
+
+\begin{equation}
+\frac{\dot{dE}}{dt}= \frac{\beta S I }{N} - \delta E \\
+\end{equation}
+
+\begin{equation}
+\frac{\dot{dI}}{dt}=   \delta E - \gamma I   \\
+\end{equation}
+
+\begin{equation}
+\frac{\dot{dR}}{dt}=   \gamma I  - \alpha I \\
+\end{equation}
+
+\begin{equation}
+\frac{\dot{dD}}{dt}=   \alpha I   
+\end{equation}
+
+
+
+### Variables
+* $S$: Individuos susceptibles - Personas sanas pero se pueden contagiar
+* $E$: Individuos expuestos/latentes - Personas contagiadas que se encuentran en el periodo de incubación
+* $I$: Individuos infectados - Personas portadoras de la enfermedad y la pueden transmitir
+* $R$: Individuos recuperados - Personas que se han recuperado de la enfermedad y se han vuelto inmunes, estos no pueden transmitir la enfermedad ni contagiarse
+* $D$: Individuos fallecidos - Personas que murieron a causa de la enfermedad
+
+
+* $N=S+E+I+R+D$ Total de la población (constante)
+
+### Parámetros
+* $\beta$: Tasa de interacción entre individuos susceptibles e infectados
+* $\delta$: Tasa de progreso entre el grupo expuesto/latente y el infectado
+* $\gamma$: Tasa de recuperación
+* $\alpha$: Tasa de mortalidad
+
+### Supuestos
+
+* Según la Oficina Nacional de Estadísticas, la población de la República Dominicana es de 10,448,498 personas
+
+
+* El primer caso infectado reportado fue el 1 de marzo de 2020
+
+* Las medidas de distanciamiento social (cuarentena y toque de queda) corresponden al periodo del 19 de marzo-30 de abril
+
+* Según la Organización Mundial de la Salud, el periodo de incubación es de 5 días
+
+* Según la Organización Mundial de la Salud, el promedio del periodo de recuperación (casos con infecciones leves y críticas) es de 4 semanas
+
+* $\beta$: 0.50 en escenarios normales, mientras que en el periodo de distanciamiento social se reduce a 0.34
+
+* $\delta$: 0.33
+
+* $\gamma$: 0.03
+
+* $\alpha$: 5\%
+
+### Fuente de datos
+
+* Sistema Nacional de Vigilancia Epidemiológica (SINAVE)
+
+### Para más información
+
+* Contactar, [Eduardo Vásquez Nolasco](<mailto:eduardovasquez_007@hotmail.com?subject=COVID19RD>)
+, [Github](https://github.com/Eduardovasquezn/COVID-19-Republica-Dominicana), [LinkedIn](https://www.linkedin.com/in/eduardo-vasquez-nolasco-933b131a3/), [eduardovasquezn.com](<http://www.eduardovasquezn.com/:eduardovasquez_007@hotmail.com?subject=COVID19RD>)
+
+* Inspirado en el proyecto de [Ramil Krispin](https://ramikrispin.github.io/coronavirus_dashboard/)
