@@ -89,7 +89,7 @@ leaflet() %>%
 
 
 
-bins <- c(0, 10,25,50, 100,300,500, 1100)
+bins <- c(0, 10,25,50, 100,300,500, 1500)
 pal <- colorBin("YlOrRd", domain = mapPROV$Casos, bins = bins)
 labels<- paste(Provincias,":",Casos)
 
