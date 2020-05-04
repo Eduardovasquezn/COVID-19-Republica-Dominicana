@@ -84,7 +84,7 @@ leaflet() %>%
               stroke = FALSE, fillOpacity = 0.5, smoothFactor = 0.5
   )
 
-bins <- c(0, 10,25,50, 100,300,500, 1500)
+bins <- c(0, 10,50, 100,300,500, 800,1500,2500)
 
 pal <- colorBin("YlOrRd", domain = mapPROV$Casos, bins = bins)
 
@@ -593,7 +593,7 @@ leaflet() %>%
 ### Mapa Animado 
  
 
-![an image caption Source](C:/Users/eduar/Google Drive (1)/Work/Short articles/COVID/covid_mapa.gif)
+![an image caption Source](C:/Users/eduar/Google Drive (1)/Work/Short articles/COVID/covid_mapa_reverso.gif)
  
 ### Evolución Provincias 
  
@@ -763,7 +763,7 @@ Descripción del Modelo
 ### Para más información
 
 * Contactar, [Eduardo Vásquez Nolasco](<mailto:eduardovasquez_007@hotmail.com?subject=COVID19RD>)
-, [Github](https://github.com/Eduardovasquezn/COVID-19-Republica-Dominicana), [LinkedIn](https://www.linkedin.com/in/eduardo-vasquez-nolasco-933b131a3/), [eduardovasquezn.com](<http://www.eduardovasquezn.com/:eduardovasquez_007@hotmail.com?subject=COVID19RD>)
+, [Github](https://github.com/Eduardovasquezn/COVID-19-Republica-Dominicana), [LinkedIn](https://www.linkedin.com/in/eduardo-vasquez-nolasco-933b131a3/), [eduardovasquezn.com](<https://eduardovasquezn.com/>)
 
 * Inspirado en el proyecto de [Ramil Krispin](https://ramikrispin.github.io/coronavirus_dashboard/)
 
